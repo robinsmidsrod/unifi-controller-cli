@@ -1,0 +1,446 @@
+#!/usr/bin/env perl
+
+use strict;
+use warnings;
+
+use FindBin;
+use lib "$FindBin::RealBin/local/lib/perl5";
+
+use Carp qw(confess);
+use Getopt::Std;
+use Config::Tiny;
+use HTTP::Tiny;
+use HTTP::CookieJar;
+use JSON qw(decode_json encode_json);
+use Text::CSV qw(csv);
+
+our $VERSION = '0.0.1';
+
+my $opts = {};
+getopts('db:f:h:p:s:u:', $opts);
+
+my $config_file = $opts->{'f'} // "$FindBin::RealBin/config.ini";
+my $cfg = Config::Tiny->read($config_file) || Config::Tiny->new();
+
+my $base_url   = $opts->{'b'} // $cfg->{_}->{'base_url'}   // 'https://unifi:8443/';
+my $username   = $opts->{'u'} // $cfg->{_}->{'username'}   // '';
+my $password   = $opts->{'p'} // $cfg->{_}->{'password'}   // '';
+my $site_desc  = $opts->{'s'} // $cfg->{_}->{'site_desc'}  // '';
+my $hosts_file = $opts->{'h'} // $cfg->{_}->{'hosts_file'} // '';
+my $debug      = $opts->{'d'} // $cfg->{_}->{'debug'}      // '';
+
+my $cmd_map = {
+    'device'         => \&cmd_device,
+    'client'         => \&cmd_client,
+    'switch_profile' => \&cmd_switch_profile,
+    'help'           => \&cmd_help,
+};
+
+my $http = HTTP::Tiny->new(
+    'agent'      => 'unifi-controller-sync/1.0',
+    'cookie_jar' => HTTP::CookieJar->new(),
+);
+
+# Run command
+my $cmd = shift @ARGV || 'help';
+my $cmd_ref = $cmd_map->{$cmd};
+
+# Run command if help
+if ( $cmd eq 'help' ) {
+    $cmd_ref->(@ARGV);
+    exit;
+}
+
+if ( is_up() ) {
+    # Login
+    login($username, $password);
+    debug("Logged in as '$username'");
+    # Get requested site
+    my $site;
+    if ( $site_desc ) {
+        my $sites_ds = get_sites();
+        foreach my $site_ds (@$sites_ds) {
+            if ( $site_ds->{'desc'} eq $site_desc ) {
+                $site = $site_ds->{'name'};
+                debug("Using site '$site_ds->{name}'");
+            }
+        }
+        confess("Unable to locate site description '$site_desc' on UniFi Controller: " . explain($sites_ds) )
+            unless $site;
+    }
+    else {
+        $site = 'default';
+        debug("Using site 'default'");
+    }
+    # Run non-help command
+    $cmd_ref->($site, @ARGV) if $cmd ne 'help';
+}
+else {
+    print "UniFi controller at $base_url is not up";
+}
+
+exit;
+
+sub cmd_help {
+    my (@args) = @_;
+    print <<EOM;
+Usage: $0 [<options>] <command>
+
+Options:
+ -f config_file (string, default: config.ini in script directory)
+ -b base_url    (string, default: https://unifi:8443/)
+ -h hosts_file  (string, default: empty)
+ -u username    (string, default: empty, required)
+ -p password    (string, default: empty, required)
+ -s site_desc   (string, default: empty, uses site 'default')
+ -d debug       (boolean, default: false)
+
+No command specified, showing help:
+
+device dump                  - dump devices
+device list [<name>]         - show devices (by name)
+device port [<name>]         - show device ports (by name)
+client dump                  - dump clients
+client list [<name>]         - show clients (by name)
+client update [<name>]       - update client name and note (by name)
+switch_profile dump          - dump switch profiles
+switch_profile list [<name>] - show switch profiles (by name)
+help                         - This page
+EOM
+}
+
+# Update clients name and note
+sub cmd_client {
+    my ($site, $cmd, $client_name, @args) = @_;
+    $cmd ||= 'list';
+    my $host_map = parse_hosts_file($hosts_file);
+    my $clients_ds = get_clients($site);
+    if ( $cmd eq 'dump' ) {
+        print explain($clients_ds);
+    }
+    if ( $cmd eq 'list' ) {
+        foreach my $client_ds ( sort by_name @$clients_ds ) {
+            my $name = $client_ds->{'name'};
+            next if $client_name and $client_name ne $name;
+            my $mac = $client_ds->{'mac'};
+            print join(' - ',
+                $client_name ? () : 'Client',
+                $client_name ? () : padl(51, $name),
+                $mac,
+                padl(8, $client_ds->{'oui'}),
+                padl(20, $client_ds->{'note'}),
+            ) . "\n";
+        }
+    }
+    if ( $cmd eq 'update' ) {
+        foreach my $client_ds (sort by_name @$clients_ds) {
+            my $mac = $client_ds->{'mac'};
+            my $old_name = $client_ds->{'name'}
+                        || $client_ds->{'hostname'}
+                        || $client_ds->{'oui'}
+                        || '';
+            next if $client_name and $client_name ne $old_name;
+            my $host_ds = $host_map->{$mac};
+            unless ( defined $host_ds ) {
+                debug( "Skipping $mac, not found in host map" . ( $old_name ? ", $old_name" : '' ) );
+                next;
+            }
+            my $update_ds = update_client($site, $client_ds, $host_ds);
+            print "Modified $mac, name=$update_ds->{name}, note=$update_ds->{note}\n"
+                if defined $update_ds and ref $update_ds eq ref {};
+        }
+    }
+    return;
+}
+
+sub cmd_switch_profile {
+    my ($site, $cmd, $sp_name, @args) = @_;
+    $cmd ||= 'list';
+    my $sps_ds = get_switch_profiles($site);
+    if ( $cmd eq 'dump' ) {
+        print explain($sps_ds);
+    }
+    if ( $cmd eq 'list' ) {
+        my $networks_ds = get_networks($site);
+        my $network_map = {
+            map { $_->{'_id'} => $_ }
+            @$networks_ds
+        };
+        foreach my $sp_ds ( sort by_name @$sps_ds ) {
+            my $name = $sp_ds->{'name'};
+            next if $sp_name and $sp_name ne $name;
+            my $native_network_ds = $network_map->{ $sp_ds->{'native_networkconf_id'} // '' } // {};
+            my $tagged_network_names = [
+                map { $_->{'name'} }
+                map { $network_map->{ $_ } // {} }
+                @{ $sp_ds->{'tagged_networkconf_ids'} // [] }
+            ];
+            print join(' - ',
+                $sp_name ? () : 'Switch Profile',
+                $sp_name ? () : padl(20, $name),
+                padl(9, $sp_ds->{'forward'}),
+                padl(16, $native_network_ds->{'name'}),
+                padl(20, join(', ', @$tagged_network_names) ),
+            ) . "\n";
+        }
+    }
+    return
+}
+
+sub cmd_device {
+    my ($site, $cmd, $dev_name, @args) = @_;
+    $cmd ||= 'list';
+    my $devices_ds = get_devices($site);
+    if ( $cmd eq 'dump' ) {
+        print explain($devices_ds);
+    }
+    if ( $cmd eq 'list' ) {
+        foreach my $device_ds ( sort by_ip @$devices_ds ) {
+            my $name = $device_ds->{'name'};
+            next if $dev_name and $dev_name ne $name;
+            my $mac = $device_ds->{'mac'};
+            my $ip = $device_ds->{'ip'};
+            print join(' - ',
+                $dev_name ? () : 'Device',
+                $dev_name ? () : padr(26, $name),
+                $mac,
+                $ip,
+            ) . "\n";
+        }
+    }
+    if ( $cmd eq 'port' ) {
+        my $switch_profiles_ds = get_switch_profiles($site);
+        my $switch_profile_map = {
+            map { $_->{'_id'} => $_ }
+            @$switch_profiles_ds
+        };
+        foreach my $device_ds ( sort by_ip @$devices_ds ) {
+            my $name = $device_ds->{'name'};
+            next if $dev_name and $dev_name ne $name;
+            my $mac = $device_ds->{'mac'};
+            my $ip = $device_ds->{'ip'};
+            my $ports_ds = $device_ds->{'port_table'};
+            foreach my $port_ds ( @$ports_ds ) {
+                my $port_number = $port_ds->{'port_idx'};
+                my $port_name = $port_ds->{'name'};
+                my $port_aggregated_by = $port_ds->{'aggregated_by'};
+                my $switch_profile_id = $port_ds->{'portconf_id'};
+                my $switch_profile_ds = $switch_profile_map->{ $switch_profile_id };
+                my $switch_profile_name = $switch_profile_ds->{'name'};
+                print join(' - ',
+                    $dev_name ? () : 'Port',
+                    $dev_name ? () : padr(26, $name),
+                    padr(2, $port_number),
+                    padl(38, $port_name . ( $port_aggregated_by ? " (aggregates port $port_aggregated_by)" : "" ) ),
+                    padl(20, $switch_profile_name),
+                ) . "\n";
+            }
+        }
+    }
+}
+
+sub parse_hosts_file {
+    my ($file) = @_;
+    confess("Please specify a hosts file")
+        unless $file;
+    my $sudo_required = -r $file ? 0 : 1;
+    my $mode = $sudo_required ? '-|' : '<';
+    my @cmd = $sudo_required ? ( 'sudo', 'cat' ) : ();
+    open my $fh, $mode, @cmd, $file
+        or confess("Unable to read $file: $!");
+    my $ds = csv(
+        'in'     => $fh,
+        'sep'    => ';',
+        'key'    => 'mac',
+        'filter' => {
+            'mac' => sub { m/^[0-9a-fA-F:]/ }
+        },
+    );
+    close $fh;
+    confess("Unable to parse $file as CSV")
+        unless defined $ds and ref $ds eq ref {};
+    return $ds;
+}
+
+sub is_up {
+    my $ds = get_json('status');
+    my $is_up = $ds->{'meta'}->{'up'} ? 1 : 0;
+    debug("Controller at $base_url is up") if $is_up;
+    return $is_up;
+}
+
+sub login {
+    my ($username, $password) = @_;
+    confess("Please specify username and password")
+        unless $username and $password;
+    my $ds = post_json('api/login', {
+        'username' => $username,
+        'password' => $password,
+        'remember' => JSON::false,
+    });
+    return $ds->{'data'};
+}
+
+sub get_sites {
+    my $ds = get_json('api/self/sites');
+    return $ds->{'data'};
+}
+
+sub get_clients {
+    my ($site) = @_;
+    my $ds = get_json('api/s/' . $site . '/rest/user');
+    return $ds->{'data'};
+}
+
+sub get_switch_profiles {
+    my ($site) = @_;
+    my $ds = get_json('api/s/' . $site . '/rest/portconf');
+    return $ds->{'data'};
+}
+
+sub get_networks {
+    my ($site) = @_;
+    my $ds = get_json('api/s/' . $site . '/rest/networkconf');
+    return $ds->{'data'};
+}
+
+sub get_devices {
+    my ($site) = @_;
+    my $ds = get_json('api/s/' . $site . '/stat/device');
+    return $ds->{'data'};
+}
+
+sub update_client {
+    my ($site, $client_ds, $lan_host) = @_;
+    confess("Please specify a valid site")
+        unless $site;
+    confess("Please specify a valid client data structure")
+        unless ref $client_ds eq ref {};
+    confess("Please specify a valid lan host data structure")
+        unless ref $lan_host eq ref {};
+    my $name_differs = _ne( $client_ds->{'name'}, $lan_host->{'hostname'} );
+    my $note_differs = _ne( $client_ds->{'note'}, $lan_host->{'comment'} );
+    if ( $name_differs or $note_differs ) {
+        my $mod = {};
+        $mod->{'name'} = $lan_host->{'hostname'} if $name_differs;
+        $mod->{'note'} = $lan_host->{'comment'} if $note_differs;
+        debug("Modify $client_ds->{mac}: name: '" . ( $client_ds->{name} // '' ) . "' -> '$lan_host->{hostname}'") if $name_differs;
+        debug("Modify $client_ds->{mac}: note: '" . ( $client_ds->{note} // '' ) . "' -> '$lan_host->{comment}'") if $note_differs;
+        my $url = 'api/s/' . $site . '/rest/user/' . $client_ds->{'_id'};
+        my $put_ds = put_json($url, $mod);
+        return $put_ds->{'data'}->[0];
+    }
+    return;
+}
+
+#############
+
+sub explain {
+    my ($value) = @_;
+    return ref $value
+         ? JSON->new->utf8->pretty->canonical->encode($value)
+         : $value;
+}
+
+sub debug {
+    my ($str) = @_;
+    return unless defined $str;
+    print "DEBUG: $str\n" if $debug;
+}
+
+# Fetch JSON using HTTP GET
+sub get_json {
+    my ($path) = @_;
+    confess("Please specify a relative API endpoint path")
+        unless $path;
+    my $url = $base_url . $path;
+    my $res = $http->get($url);
+    confess("UniFi controller endpoint $url is not responding: $res->{status} $res->{reason}")
+        unless $res->{'success'};
+    my $ds = eval { decode_json($res->{'content'}); };
+    confess("UniFi controller endpoint GET $url is not returning JSON: $res->{content}")
+        unless defined $ds;
+    confess("UniFi controller endpoint GET $url reported an error: $ds->{meta}->{msg}" )
+        if $ds->{'meta'}->{'rc'} ne 'ok';
+    return $ds;
+}
+
+# Send JSON using HTTP POST
+sub post_json {
+    my ($path, $body_ds) = @_;
+    confess("Please specify a relative API endpoint path and body data structure")
+        unless $path and $body_ds;
+    my $url = $base_url . $path;
+    my $content = eval { encode_json($body_ds); };
+    confess("Unable to encode data structure as JSON: $body_ds")
+        unless defined $content;
+    my $res = $http->post($url, { 'content' => $content });
+    confess("UniFi controller endpoint $url is not responding: $res->{status} $res->{reason}")
+        unless $res->{'success'};
+    my $ds = eval { decode_json($res->{'content'}); };
+    confess("UniFi controller endpoint POST $url is not returning JSON: $res->{content}")
+        unless defined $ds;
+    confess("UniFi controller endpoint POST $url reported an error: $ds->{meta}->{msg}" )
+        if $ds->{'meta'}->{'rc'} ne 'ok';
+    return $ds;
+}
+
+# Send JSON using HTTP PUT
+sub put_json {
+    my ($path, $body_ds) = @_;
+    confess("Please specify a relative API endpoint path and body data structure")
+        unless $path and $body_ds;
+    my $url = $base_url . $path;
+    my $content = eval { encode_json($body_ds); };
+    confess("Unable to encode data structure as JSON: $body_ds")
+        unless defined $content;
+    my $res = $http->put($url, { 'content' => $content });
+    confess("UniFi controller endpoint $url is not responding: $res->{status} $res->{reason}")
+        unless $res->{'success'};
+    my $ds = eval { decode_json($res->{'content'}); };
+    confess("UniFi controller endpoint PUT $url is not returning JSON: $res->{content}")
+        unless defined $ds;
+    confess("UniFi controller endpoint PUT $url reported an error: $ds->{meta}->{msg}" )
+        if $ds->{'meta'}->{'rc'} ne 'ok';
+    return $ds;
+}
+
+# Return true if values do not match
+# If both values are undefined they should match
+sub _ne {
+    my ($p1, $p2) = @_;
+    return 1 if not ( defined $p1 and defined $p2 ); # both are undef
+    return 1 if defined $p1 xor defined $p2;         # one of them is undef
+    return 1 if $p1 ne $p2;                          # both are defined and differ
+    return 0;                                        # both are defined and equal
+}
+
+sub trim {
+    my ($str) = @_;
+    $str =~ s/^\s*//;
+    $str =~ s/\s*$//;
+    return $str;
+}
+
+sub padr {
+    my ($length, $str) = @_;
+    $str //= '';
+    $str = trim($str);
+    my $pad_length = $length - length $str;
+    $pad_length = 0 if $pad_length < 0;
+    my $pad = " " x $pad_length;
+    return "$pad$str";
+}
+
+sub padl {
+    my ($length, $str) = @_;
+    $str //= '';
+    $str = trim($str);
+    my $pad_length = $length - length $str;
+    $pad_length = 0 if $pad_length < 0;
+    my $pad = " " x $pad_length;
+    return "$str$pad";
+}
+
+sub by_name { $a->{'name'} cmp $b->{'name'} }
+sub by_ip   { $a->{'ip'}   cmp $b->{'ip'}   }

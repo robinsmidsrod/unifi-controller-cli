@@ -1,0 +1,114 @@
+# carton snapshot format: version 1.0
+DISTRIBUTIONS
+  Config-Tiny-2.26
+    pathname: R/RS/RSAVAGE/Config-Tiny-2.26.tgz
+    provides:
+      Config::Tiny 2.26
+    requirements:
+      ExtUtils::MakeMaker 0
+      File::Spec 3.3
+      File::Temp 0.22
+      Test::More 0.47
+      strict 0
+      utf8 0
+  HTTP-CookieJar-0.010
+    pathname: D/DA/DAGOLDEN/HTTP-CookieJar-0.010.tar.gz
+    provides:
+      HTTP::CookieJar 0.010
+      HTTP::CookieJar::LWP 0.010
+    requirements:
+      Carp 0
+      ExtUtils::MakeMaker 6.17
+      HTTP::Date 0
+      Time::Local 1.1901
+      parent 0
+      perl 5.008001
+      strict 0
+      warnings 0
+  HTTP-Date-6.05
+    pathname: O/OA/OALDERS/HTTP-Date-6.05.tar.gz
+    provides:
+      HTTP::Date 6.05
+    requirements:
+      Exporter 0
+      ExtUtils::MakeMaker 0
+      Time::Local 1.28
+      Time::Zone 0
+      perl 5.006002
+      strict 0
+  JSON-4.03
+    pathname: I/IS/ISHIGAKI/JSON-4.03.tar.gz
+    provides:
+      JSON 4.03
+      JSON::Backend::PP 4.03
+    requirements:
+      ExtUtils::MakeMaker 0
+      Test::More 0
+  Text-CSV-2.00
+    pathname: I/IS/ISHIGAKI/Text-CSV-2.00.tar.gz
+    provides:
+      Text::CSV 2.00
+      Text::CSV::ErrorDiag 2.00
+      Text::CSV_PP 2.00
+    requirements:
+      ExtUtils::MakeMaker 0
+      IO::Handle 0
+      Test::Harness 0
+      Test::More 0.71
+      perl 5.006001
+  Time-Local-1.30
+    pathname: D/DR/DROLSKY/Time-Local-1.30.tar.gz
+    provides:
+      Time::Local 1.30
+    requirements:
+      Carp 0
+      Exporter 0
+      ExtUtils::MakeMaker 0
+      constant 0
+      parent 0
+      strict 0
+  TimeDate-2.33
+    pathname: A/AT/ATOOMIC/TimeDate-2.33.tar.gz
+    provides:
+      Date::Format 2.24
+      Date::Format::Generic 2.24
+      Date::Language 1.10
+      Date::Language::Afar 0.99
+      Date::Language::Amharic 1.00
+      Date::Language::Austrian 1.01
+      Date::Language::Brazilian 1.01
+      Date::Language::Bulgarian 1.01
+      Date::Language::Chinese 1.00
+      Date::Language::Chinese_GB 1.01
+      Date::Language::Czech 1.01
+      Date::Language::Danish 1.01
+      Date::Language::Dutch 1.02
+      Date::Language::English 1.01
+      Date::Language::Finnish 1.01
+      Date::Language::French 1.04
+      Date::Language::Gedeo 0.99
+      Date::Language::German 1.02
+      Date::Language::Greek 1.00
+      Date::Language::Hungarian 1.01
+      Date::Language::Icelandic 1.01
+      Date::Language::Italian 1.01
+      Date::Language::Norwegian 1.01
+      Date::Language::Occitan 1.04
+      Date::Language::Oromo 0.99
+      Date::Language::Romanian 1.01
+      Date::Language::Russian 1.01
+      Date::Language::Russian_cp1251 1.01
+      Date::Language::Russian_koi8r 1.01
+      Date::Language::Sidama 0.99
+      Date::Language::Somali 0.99
+      Date::Language::Spanish 1.00
+      Date::Language::Swedish 1.01
+      Date::Language::Tigrinya 1.00
+      Date::Language::TigrinyaEritrean 1.00
+      Date::Language::TigrinyaEthiopian 1.00
+      Date::Language::Turkish 1.0
+      Date::Parse 2.33
+      Time::Zone 2.24
+      TimeDate 1.21
+    requirements:
+      ExtUtils::MakeMaker 0

@@ -1,0 +1,9 @@
+requires 'FindBin';
+requires 'lib';
+requires 'Carp';
+requires 'Getopt::Std';
+requires 'Config::Tiny';
+requires 'HTTP::Tiny';
+requires 'HTTP::CookieJar';
+requires 'JSON';
+requires 'Text::CSV';
