@@ -177,7 +177,7 @@ sub cmd_switch_profile {
             ];
             print join(' - ',
                 $sp_name ? () : 'Switch Profile',
-                $sp_name ? () : padl(20, $name),
+                $sp_name ? () : padl(29, $name),
                 padl(9, $sp_ds->{'forward'}),
                 padl(16, $native_network_ds->{'name'}),
                 padl(20, join(', ', @$tagged_network_names) ),
@@ -442,5 +442,5 @@ sub padl {
     return "$str$pad";
 }
 
-sub by_name { $a->{'name'} cmp $b->{'name'} }
-sub by_ip   { $a->{'ip'}   cmp $b->{'ip'}   }
+sub by_name { ($a->{'name'} // '') cmp ($b->{'name'} // '') }
+sub by_ip   { ($a->{'ip'}   // '') cmp ($b->{'ip'}   // '') }

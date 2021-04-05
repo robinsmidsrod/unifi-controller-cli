@@ -1,3 +1,4 @@
+# cpanfile
 requires 'FindBin';
 requires 'lib';
 requires 'Carp';
