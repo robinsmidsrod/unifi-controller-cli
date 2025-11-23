@@ -112,6 +112,12 @@ Ensure the config file is private, because it contains credentials:
 $ chmod 0600 config.ini
 ```
 
+## UniFi API documentation
+
+Documentation for the UniFi API can be found here:
+
+https://ubntwiki.com/products/software/unifi-controller/api
+
 ## Legal
 
 Copyright Robin Smidsrød 2021
