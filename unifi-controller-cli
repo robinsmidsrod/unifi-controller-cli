@@ -39,6 +39,7 @@ my $cmd_map = {
 my $http = HTTP::Tiny->new(
     'agent'      => 'unifi-controller-sync/1.0',
     'cookie_jar' => HTTP::CookieJar->new(),
+    'verify_SSL' => 0,
 );
 
 # Run command
