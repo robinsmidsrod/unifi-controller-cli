@@ -121,7 +121,7 @@ sub cmd_client {
     }
     if ( $cmd eq 'list' ) {
         foreach my $client_ds ( sort by_name @$clients_ds ) {
-            my $name = $client_ds->{'name'};
+            my $name = $client_ds->{'name'} // '';
             next if $client_name and $client_name ne $name;
             my $mac = $client_ds->{'mac'};
             print join(' - ',
@@ -226,8 +226,8 @@ sub cmd_device {
                 my $port_name = $port_ds->{'name'};
                 my $port_aggregated_by = $port_ds->{'aggregated_by'};
                 my $switch_profile_id = $port_ds->{'portconf_id'};
-                my $switch_profile_ds = $switch_profile_map->{ $switch_profile_id };
-                my $switch_profile_name = $switch_profile_ds->{'name'};
+                my $switch_profile_ds = $switch_profile_id ? $switch_profile_map->{ $switch_profile_id } : {};
+                my $switch_profile_name = $switch_profile_ds->{'name'} || '';
                 print join(' - ',
                     $dev_name ? () : 'Port',
                     $dev_name ? () : padr(26, $name),
