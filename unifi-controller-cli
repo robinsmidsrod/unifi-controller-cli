@@ -356,7 +356,7 @@ sub get_json {
         unless $path;
     my $url = $base_url . $path;
     my $res = $http->get($url);
-    confess("UniFi controller endpoint $url is not responding: $res->{status} $res->{reason}")
+    confess("UniFi controller endpoint $url is not responding: $res->{status} $res->{reason}: $res->{content}")
         unless $res->{'success'};
     my $ds = eval { decode_json($res->{'content'}); };
     confess("UniFi controller endpoint GET $url is not returning JSON: $res->{content}")
@@ -376,7 +376,7 @@ sub post_json {
     confess("Unable to encode data structure as JSON: $body_ds")
         unless defined $content;
     my $res = $http->post($url, { 'content' => $content });
-    confess("UniFi controller endpoint $url is not responding: $res->{status} $res->{reason}")
+    confess("UniFi controller endpoint $url is not responding: $res->{status} $res->{reason}: $res->{content}")
         unless $res->{'success'};
     my $ds = eval { decode_json($res->{'content'}); };
     confess("UniFi controller endpoint POST $url is not returning JSON: $res->{content}")
@@ -396,7 +396,7 @@ sub put_json {
     confess("Unable to encode data structure as JSON: $body_ds")
         unless defined $content;
     my $res = $http->put($url, { 'content' => $content });
-    confess("UniFi controller endpoint $url is not responding: $res->{status} $res->{reason}")
+    confess("UniFi controller endpoint $url is not responding: $res->{status} $res->{reason}: $res->{content}")
         unless $res->{'success'};
     my $ds = eval { decode_json($res->{'content'}); };
     confess("UniFi controller endpoint PUT $url is not returning JSON: $res->{content}")
