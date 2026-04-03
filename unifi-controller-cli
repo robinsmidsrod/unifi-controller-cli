@@ -22,12 +22,14 @@ getopts('db:f:h:p:s:u:', $opts);
 my $config_file = $opts->{'f'} // "$FindBin::RealBin/config.ini";
 my $cfg = Config::Tiny->read($config_file) || Config::Tiny->new();
 
-my $base_url   = $opts->{'b'} // $cfg->{_}->{'base_url'}   // 'https://unifi:8443/';
+my $base_url   = $opts->{'b'} // $cfg->{_}->{'base_url'}   // 'https://unifi:11443/';
 my $username   = $opts->{'u'} // $cfg->{_}->{'username'}   // '';
 my $password   = $opts->{'p'} // $cfg->{_}->{'password'}   // '';
 my $site_desc  = $opts->{'s'} // $cfg->{_}->{'site_desc'}  // '';
 my $hosts_file = $opts->{'h'} // $cfg->{_}->{'hosts_file'} // '';
 my $debug      = $opts->{'d'} // $cfg->{_}->{'debug'}      // '';
+
+my $network_api_prefix = 'proxy/network/';
 
 my $cmd_map = {
     'device'         => \&cmd_device,
@@ -40,6 +42,9 @@ my $http = HTTP::Tiny->new(
     'agent'      => 'unifi-controller-sync/1.0',
     'cookie_jar' => HTTP::CookieJar->new(),
     'verify_SSL' => 0,
+    'default_headers' => {
+        'Content-Type' => 'application/json',
+    },
 );
 
 # Run command
@@ -144,6 +149,10 @@ sub cmd_client {
             my $host_ds = $host_map->{$mac};
             unless ( defined $host_ds ) {
                 debug( "Skipping $mac, not found in host map" . ( $old_name ? ", $old_name" : '' ) );
+                next;
+            }
+            if ( defined $client_ds->{'unifi_device_info_from_ucore'} ) {
+                debug( "Skipping $mac, " . $client_ds->{'unifi_device_info_from_ucore'}->{'name'} . " managed by UniFi, $host_ds->{hostname}" );
                 next;
             }
             my $update_ds = update_client($site, $client_ds, $host_ds);
@@ -264,9 +273,9 @@ sub parse_hosts_file {
 }
 
 sub is_up {
-    my $ds = get_json('status');
-    my $is_up = $ds->{'meta'}->{'up'} ? 1 : 0;
-    debug("Controller at $base_url is up") if $is_up;
+    my $ds = get_json_os('api/system');
+    my $is_up = length( $ds->{'mac'} ) > 1 ? 1 : 0;
+    debug("UniFi OS at $base_url is up") if $is_up;
     return $is_up;
 }
 
@@ -274,12 +283,11 @@ sub login {
     my ($username, $password) = @_;
     confess("Please specify username and password")
         unless $username and $password;
-    my $ds = post_json('api/login', {
+    my $ds = post_json_os('api/auth/login', {
         'username' => $username,
         'password' => $password,
-        'remember' => JSON::false,
     });
-    return $ds->{'data'};
+    return $ds;
 }
 
 sub get_sites {
@@ -354,7 +362,7 @@ sub get_json {
     my ($path) = @_;
     confess("Please specify a relative API endpoint path")
         unless $path;
-    my $url = $base_url . $path;
+    my $url = $base_url . $network_api_prefix . $path;
     my $res = $http->get($url);
     confess("UniFi controller endpoint $url is not responding: $res->{status} $res->{reason}: $res->{content}")
         unless $res->{'success'};
@@ -366,12 +374,27 @@ sub get_json {
     return $ds;
 }
 
+# Fetch JSON for UniFi OS Server using HTTP GET
+sub get_json_os {
+    my ($path) = @_;
+    confess("Please specify a relative API endpoint path")
+        unless $path;
+    my $url = $base_url . $path;
+    my $res = $http->get($url);
+    confess("UniFi OS endpoint $url is not responding: $res->{status} $res->{reason}: $res->{content}")
+        unless $res->{'success'};
+    my $ds = eval { decode_json($res->{'content'}); };
+    confess("UniFi OS endpoint GET $url is not returning JSON: $res->{content}")
+        unless defined $ds;
+    return $ds;
+}
+
 # Send JSON using HTTP POST
 sub post_json {
     my ($path, $body_ds) = @_;
     confess("Please specify a relative API endpoint path and body data structure")
         unless $path and $body_ds;
-    my $url = $base_url . $path;
+    my $url = $base_url . $network_api_prefix . $path;
     my $content = eval { encode_json($body_ds); };
     confess("Unable to encode data structure as JSON: $body_ds")
         unless defined $content;
@@ -386,15 +409,35 @@ sub post_json {
     return $ds;
 }
 
-# Send JSON using HTTP PUT
-sub put_json {
+# Send JSON to UniFi OS Server using HTTP POST
+sub post_json_os {
     my ($path, $body_ds) = @_;
     confess("Please specify a relative API endpoint path and body data structure")
         unless $path and $body_ds;
     my $url = $base_url . $path;
     my $content = eval { encode_json($body_ds); };
+    #debug($content);
     confess("Unable to encode data structure as JSON: $body_ds")
         unless defined $content;
+    my $res = $http->post($url, { 'content' => $content });
+    confess("UniFi OS endpoint $url is not responding: $res->{status} $res->{reason}: $res->{content}")
+        unless $res->{'success'};
+    my $ds = eval { decode_json($res->{'content'}); };
+    confess("UniFi OS endpoint POST $url is not returning JSON: $res->{content}")
+        unless defined $ds;
+    return $ds;
+}
+
+# Send JSON using HTTP PUT
+sub put_json {
+    my ($path, $body_ds) = @_;
+    confess("Please specify a relative API endpoint path and body data structure")
+        unless $path and $body_ds;
+    my $url = $base_url . $network_api_prefix . $path;
+    my $content = eval { encode_json($body_ds); };
+    confess("Unable to encode data structure as JSON: $body_ds")
+        unless defined $content;
+    debug($content);
     my $res = $http->put($url, { 'content' => $content });
     confess("UniFi controller endpoint $url is not responding: $res->{status} $res->{reason}: $res->{content}")
         unless $res->{'success'};
