@@ -2,6 +2,8 @@
 
 Command-line interface to UniFi Controller API.
 
+Updated to work with UniFi OS.
+
 ## Usage
 
 ```
